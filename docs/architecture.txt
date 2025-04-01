@@ -1,0 +1,38 @@
+"""
+System architecture diagram for the Meme Coin Signal Bot.
+
++---------------------+    +----------------------+    +----------------------+
+| Blockchain Scanners |    | Social Media Monitor |    | Token Database       |
+|---------------------|    |----------------------|    |----------------------|
+| - Ethereum Scanner  |    | - Twitter/X Monitor  |    | - Token Metadata     |
+| - Solana Scanner    |    | - Telegram Monitor   |    | - Price History      |
+| - Liquidity Tracker |    | - Keyword Tracker    |    | - Volume History     |
+| - Volume Tracker    |    | - Influencer Tracker |    | - Holder Stats       |
+| - Holder Counter    |    | - Sentiment Analyzer |    | - Social Mentions    |
+| - Contract Analyzer |    |                      |    | - Safety Scores      |
++---------------------+    +----------------------+    +----------------------+
+          |                           |                           |
+          v                           v                           v
++-----------------------------------------------------------------------------------+
+|                               Scoring Engine                                      |
+|-----------------------------------------------------------------------------------|
+| - Liquidity Scorer | - Volume Surge Detector | - Social Buzz Scorer | - Combined  |
++-----------------------------------------------------------------------------------+
+                                      |
+                                      v
++-----------------------------------------------------------------------------------+
+|                             Signal Generator                                      |
+|-----------------------------------------------------------------------------------|
+| - Buy Signal Creator | - Alert Formatter | - Report Generator | - Stats Compiler  |
++-----------------------------------------------------------------------------------+
+                                      |
+                                      v
++---------------------+    +----------------------+    +----------------------+
+| Telegram Bot        |    | Web Dashboard        |    | Monitoring & Logs    |
+|---------------------|    |----------------------|    |----------------------|
+| - Command Handlers  |    | - Streamlit UI       |    | - Error Logging      |
+| - Alert Sender      |    | - Data Visualizer    |    | - Performance Stats  |
+| - Channel Publisher |    | - Manual Filters     |    | - Health Checks      |
+| - User Interaction  |    | - Custom Watchlists  |    | - Restart Handling   |
++---------------------+    +----------------------+    +----------------------+
+"""
