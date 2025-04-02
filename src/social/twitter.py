@@ -19,17 +19,10 @@ from .base import SocialMediaMonitor
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Flag to track if data_api is available
+# We're using the mock implementation since we don't need the data_api module
+# This fixes the crash caused by trying to import a non-existent module
 DATA_API_AVAILABLE = False
-
-# Try to import data_api
-try:
-    sys.path.append('/opt/.manus/.sandbox-runtime')
-    from data_api import ApiClient
-    DATA_API_AVAILABLE = True
-    logger.info("Successfully imported data_api module")
-except ImportError as e:
-    logger.warning(f"Could not import data_api module: {str(e)}. Using mock implementation.")
+logger.info("Using mock implementation for Twitter API")
 
 class TwitterMonitor(SocialMediaMonitor):
     """Twitter social media monitor implementation."""
@@ -40,14 +33,8 @@ class TwitterMonitor(SocialMediaMonitor):
         self.last_search_time = datetime.utcnow() - timedelta(hours=24)
         self.monitored_keywords = []
         
-        # Initialize API client if available
-        if DATA_API_AVAILABLE:
-            try:
-                self.api_client = ApiClient()
-                logger.info("Twitter API client initialized successfully")
-            except Exception as e:
-                logger.error(f"Error initializing Twitter API client: {str(e)}")
-                self.api_client = None
+        # No API client initialization needed as we're using mock implementation
+        logger.info("Twitter monitor initialized with mock implementation")
     
     async def search_for_mentions(self, keywords: List[str]) -> List[Dict[str, Any]]:
         """

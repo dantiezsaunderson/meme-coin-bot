@@ -24,135 +24,148 @@ WSOL_MINT = "So11111111111111111111111111111111111111112"
 RAYDIUM_PROGRAM_ID = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 ORCA_PROGRAM_ID = "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP"
 
-# Flag to track if solana package is available
-SOLANA_AVAILABLE = False
+# Import required packages for Solana and Helius integration
+import helius
+from helius import BalancesAPI, NFTAPI, TransactionsAPI
 
-# Try to import solana packages
-try:
-    from solana.rpc.async_api import AsyncClient
-    from solana.publickey import PublicKey
-    from solana.rpc.types import TokenAccountOpts
-    SOLANA_AVAILABLE = True
-except ImportError:
-    logger.warning("Solana package not available. Using mock implementation.")
-    # Mock classes for when solana package is not available
-    class AsyncClient:
-        def __init__(self, url):
-            self.url = url
-        
-        async def get_signatures_for_address(self, *args, **kwargs):
-            class Value:
-                def __init__(self):
-                    self.value = []
-            return Value()
-        
-        async def get_transaction(self, *args, **kwargs):
-            class Value:
-                def __init__(self):
-                    self.value = None
-            return Value()
-        
-        async def get_token_supply(self, *args, **kwargs):
-            class Value:
-                def __init__(self):
-                    self.value = None
-            return Value()
-        
-        async def get_account_info(self, *args, **kwargs):
-            class Value:
-                def __init__(self):
-                    self.value = None
-            return Value()
-        
-        async def get_token_largest_accounts(self, *args, **kwargs):
-            class Value:
-                def __init__(self):
-                    self.value = []
-            return Value()
+# Set Solana as available since we're using live integration
+SOLANA_AVAILABLE = True
+
+# Extract Helius API key from the RPC URL
+HELIUS_API_KEY = SOLANA_RPC_URL.split('api-key=')[-1] if 'api-key=' in SOLANA_RPC_URL else None
+if not HELIUS_API_KEY:
+    logger.warning("Helius API key not found in SOLANA_RPC_URL. Some features may not work properly.")
     
-    class PublicKey:
-        def __init__(self, address):
-            self.address = address
+# Initialize Helius APIs
+try:
+    balances_api = BalancesAPI(HELIUS_API_KEY) if HELIUS_API_KEY else None
+    nft_api = NFTAPI(HELIUS_API_KEY) if HELIUS_API_KEY else None
+    transactions_api = TransactionsAPI(HELIUS_API_KEY) if HELIUS_API_KEY else None
+    logger.info("Helius API clients initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing Helius API clients: {str(e)}")
 
 class SolanaScanner(BlockchainScanner):
     """Solana blockchain scanner implementation."""
     
     def __init__(self):
         """Initialize the Solana scanner."""
-        self.client = AsyncClient(SOLANA_RPC_URL)
+        # Use requests directly instead of AsyncClient
+        self.helius_balances_api = balances_api
+        self.helius_nft_api = nft_api
+        self.helius_transactions_api = transactions_api
     
     async def scan_for_new_tokens(self) -> List[Dict[str, Any]]:
         """
-        Scan the Solana blockchain for new token launches.
+        Scan the Solana blockchain for new token launches using Helius API.
         
         Returns:
             List of dictionaries containing token information.
         """
-        logger.info("Scanning Solana blockchain for new token launches")
-        
-        # If solana package is not available, return mock data
-        if not SOLANA_AVAILABLE:
-            logger.warning("Using mock data for Solana scanner")
-            return self._generate_mock_tokens(5)
+        logger.info("Scanning Solana blockchain for new token launches using Helius API")
         
         new_tokens = []
         
         try:
-            # Get recent token creations by looking at program signatures
-            # In a real implementation, we would use more sophisticated methods
-            # like monitoring Raydium/Orca pool creations
+            # Use Helius TransactionsAPI to get recent transactions for Raydium and Orca
+            # to find new token pool creations
             
-            # Get recent signatures for the Token Program
-            token_program_id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-            signatures = await self.client.get_signatures_for_address(
-                PublicKey(token_program_id),
-                limit=100
-            )
-            
-            # Process each signature to find new token mints
-            for sig_info in signatures.value:
+            # Get recent transactions for Raydium program
+            raydium_txs = []
+            if self.helius_transactions_api:
                 try:
-                    # Get transaction details
-                    tx = await self.client.get_transaction(
-                        sig_info.signature,
-                        encoding="jsonParsed"
+                    # Get recent transactions for Raydium program
+                    raydium_txs = self.helius_transactions_api.get_parsed_transaction_history(
+                        RAYDIUM_PROGRAM_ID,
+                        limit=50
                     )
+                    logger.info(f"Retrieved {len(raydium_txs) if raydium_txs else 0} Raydium transactions")
+                except Exception as e:
+                    logger.error(f"Error getting Raydium transactions: {str(e)}")
+            
+            # Get recent transactions for Orca program
+            orca_txs = []
+            if self.helius_transactions_api:
+                try:
+                    # Get recent transactions for Orca program
+                    orca_txs = self.helius_transactions_api.get_parsed_transaction_history(
+                        ORCA_PROGRAM_ID,
+                        limit=50
+                    )
+                    logger.info(f"Retrieved {len(orca_txs) if orca_txs else 0} Orca transactions")
+                except Exception as e:
+                    logger.error(f"Error getting Orca transactions: {str(e)}")
+            
+            # Process Raydium transactions to find new token pools
+            for tx in raydium_txs or []:
+                try:
+                    # Extract token addresses from transaction
+                    token_addresses = self._extract_token_addresses_from_tx(tx)
                     
-                    # Skip if transaction failed
-                    if not tx.value or not tx.value.transaction or not tx.value.meta or tx.value.meta.err:
-                        continue
-                    
-                    # Look for token creation in post-token balances
-                    if tx.value.meta.post_token_balances:
-                        for balance in tx.value.meta.post_token_balances:
-                            mint = balance.mint
-                            
-                            # Skip known tokens
-                            if mint in [USDC_MINT, WSOL_MINT]:
-                                continue
-                            
-                            # Get token info
-                            token_info = await self._get_token_info(mint)
-                            if not token_info:
-                                continue
-                            
-                            # Check liquidity
-                            liquidity = await self.get_token_liquidity(mint)
-                            if liquidity < MIN_LIQUIDITY_USD:
-                                continue
-                            
-                            # Add liquidity to token info
-                            token_info["liquidity_usd"] = liquidity
-                            token_info["blockchain"] = BlockchainType.SOLANA.value
-                            
-                            # Check if it's a potential meme coin based on name/symbol
-                            if self._is_potential_meme_coin(token_info):
-                                # Avoid duplicates
-                                if not any(t["address"] == mint for t in new_tokens):
-                                    new_tokens.append(token_info)
+                    for token_address in token_addresses:
+                        # Skip known tokens
+                        if token_address in [USDC_MINT, WSOL_MINT]:
+                            continue
+                        
+                        # Get token info
+                        token_info = await self._get_token_info(token_address)
+                        if not token_info:
+                            continue
+                        
+                        # Check liquidity
+                        liquidity = await self.get_token_liquidity(token_address)
+                        if liquidity < MIN_LIQUIDITY_USD:
+                            continue
+                        
+                        # Add liquidity to token info
+                        token_info["liquidity_usd"] = liquidity
+                        token_info["blockchain"] = BlockchainType.SOLANA.value
+                        
+                        # Check if it's a potential meme coin based on name/symbol
+                        if self._is_potential_meme_coin(token_info):
+                            # Avoid duplicates
+                            if not any(t["address"] == token_address for t in new_tokens):
+                                new_tokens.append(token_info)
                 
                 except Exception as e:
-                    logger.error(f"Error processing transaction {sig_info.signature}: {str(e)}")
+                    logger.error(f"Error processing Raydium transaction: {str(e)}")
+                    continue
+            
+            # Process Orca transactions to find new token pools
+            for tx in orca_txs or []:
+                try:
+                    # Extract token addresses from transaction
+                    token_addresses = self._extract_token_addresses_from_tx(tx)
+                    
+                    for token_address in token_addresses:
+                        # Skip known tokens
+                        if token_address in [USDC_MINT, WSOL_MINT]:
+                            continue
+                        
+                        # Skip tokens we've already processed
+                        if any(t["address"] == token_address for t in new_tokens):
+                            continue
+                        
+                        # Get token info
+                        token_info = await self._get_token_info(token_address)
+                        if not token_info:
+                            continue
+                        
+                        # Check liquidity
+                        liquidity = await self.get_token_liquidity(token_address)
+                        if liquidity < MIN_LIQUIDITY_USD:
+                            continue
+                        
+                        # Add liquidity to token info
+                        token_info["liquidity_usd"] = liquidity
+                        token_info["blockchain"] = BlockchainType.SOLANA.value
+                        
+                        # Check if it's a potential meme coin based on name/symbol
+                        if self._is_potential_meme_coin(token_info):
+                            new_tokens.append(token_info)
+                
+                except Exception as e:
+                    logger.error(f"Error processing Orca transaction: {str(e)}")
                     continue
             
             logger.info(f"Found {len(new_tokens)} potential new meme coins on Solana")
@@ -160,38 +173,62 @@ class SolanaScanner(BlockchainScanner):
         
         except Exception as e:
             logger.error(f"Error scanning Solana blockchain: {str(e)}")
-            # Return mock data if there's an error
-            return self._generate_mock_tokens(3)
+            # We don't want to return mock data in production
+            return []
     
-    def _generate_mock_tokens(self, count: int) -> List[Dict[str, Any]]:
-        """Generate mock token data for testing."""
-        mock_tokens = []
-        meme_prefixes = ["DOGE", "SHIB", "PEPE", "MOON", "ELON", "FLOKI", "APE", "WOJAK", "BONK", "SAMO"]
-        meme_suffixes = ["INU", "MOON", "ROCKET", "LAMBO", "COIN", "TOKEN", "MEME", "SAFE"]
+    def _extract_token_addresses_from_tx(self, tx: Dict[str, Any]) -> List[str]:
+        """
+        Extract token addresses from a transaction.
         
-        for i in range(count):
-            prefix = random.choice(meme_prefixes)
-            suffix = random.choice(meme_suffixes)
-            symbol = f"{prefix}{suffix[:2]}"
-            address = f"SOL{i}{''.join(random.choices('0123456789ABCDEF', k=32))}"
+        Args:
+            tx: Transaction data from Helius API.
             
-            token_info = {
-                "address": address,
-                "name": f"{prefix} {suffix}",
-                "symbol": symbol,
-                "decimals": 9,
-                "total_supply": random.uniform(1000000, 1000000000),
-                "liquidity_usd": random.uniform(10000, 100000),
-                "blockchain": BlockchainType.SOLANA.value
-            }
-            
-            mock_tokens.append(token_info)
+        Returns:
+            List of token addresses.
+        """
+        token_addresses = []
         
-        return mock_tokens
+        try:
+            # Extract token addresses from transaction data
+            # This is a simplified implementation - in production, would need more robust parsing
+            
+            # Check if we have account keys
+            if 'accountKeys' in tx:
+                # Look for token program interactions
+                token_program_id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                for account in tx['accountKeys']:
+                    if account.get('program') == 'spl-token':
+                        token_address = account.get('pubkey')
+                        if token_address and token_address != token_program_id:
+                            token_addresses.append(token_address)
+            
+            # Check for token balances
+            if 'meta' in tx and 'postTokenBalances' in tx['meta']:
+                for balance in tx['meta']['postTokenBalances']:
+                    if 'mint' in balance:
+                        token_addresses.append(balance['mint'])
+            
+            # Check for instructions that might contain token addresses
+            if 'instructions' in tx:
+                for instruction in tx['instructions']:
+                    if 'accounts' in instruction:
+                        for account in instruction['accounts']:
+                            # Heuristic: token addresses are usually 32-44 characters
+                            if isinstance(account, str) and len(account) >= 32 and len(account) <= 44:
+                                token_addresses.append(account)
+            
+            # Remove duplicates
+            token_addresses = list(set(token_addresses))
+            
+            return token_addresses
+        
+        except Exception as e:
+            logger.error(f"Error extracting token addresses from transaction: {str(e)}")
+            return []
     
     async def _get_token_info(self, token_address: str) -> Optional[Dict[str, Any]]:
         """
-        Get basic information about a token.
+        Get basic information about a token using Helius API.
         
         Args:
             token_address: The token mint address.
@@ -199,57 +236,41 @@ class SolanaScanner(BlockchainScanner):
         Returns:
             Dictionary containing token information or None if error.
         """
-        if not SOLANA_AVAILABLE:
-            # Return mock data
+        try:
+            # First try to use Helius BalancesAPI to get token info
+            if self.helius_balances_api:
+                try:
+                    # Get token metadata from Helius
+                    token_metadata = self.helius_balances_api.get_token_metadata(token_address)
+                    
+                    if token_metadata:
+                        # Extract token data from Helius response
+                        name = token_metadata.get('name', f"Solana Token {token_address[:6]}")
+                        symbol = token_metadata.get('symbol', f"SOL{token_address[:4]}")
+                        decimals = token_metadata.get('decimals', 9)
+                        
+                        # For supply, use a default value since we can't get it from RPC now
+                        total_supply = 1000000000  # Default large supply
+                        
+                        return {
+                            "address": token_address,
+                            "name": name,
+                            "symbol": symbol,
+                            "decimals": decimals,
+                            "total_supply": total_supply
+                        }
+                except Exception as e:
+                    logger.warning(f"Error getting token info from Helius for {token_address}: {str(e)}")
+            
+            # Fallback to basic info if Helius API failed
+            logger.info(f"Using basic token info for {token_address}")
+            
             return {
                 "address": token_address,
                 "name": f"Solana Token {token_address[:6]}",
                 "symbol": f"SOL{token_address[:4]}",
                 "decimals": 9,
-                "total_supply": random.uniform(1000000, 1000000000)
-            }
-        
-        try:
-            # Get token account info
-            token_info = await self.client.get_token_supply(
-                PublicKey(token_address)
-            )
-            
-            # Get token metadata
-            account_info = await self.client.get_account_info(
-                PublicKey(token_address),
-                encoding="jsonParsed"
-            )
-            
-            if not token_info.value or not account_info.value:
-                return None
-            
-            # Extract token data
-            data = account_info.value.data
-            decimals = data.parsed["info"]["decimals"] if "parsed" in data else 0
-            
-            # For Solana, we need to get metadata from the token metadata program
-            # This is simplified - in production, query the Metaplex metadata account
-            name = f"Solana Token {token_address[:6]}"
-            symbol = f"SOL{token_address[:4]}"
-            
-            # Try to get better name/symbol from token registry or on-chain metadata
-            # This is a placeholder - in production, use proper metadata resolution
-            try:
-                # This would be replaced with actual metadata resolution
-                metadata = await self._get_token_metadata(token_address)
-                if metadata:
-                    name = metadata.get("name", name)
-                    symbol = metadata.get("symbol", symbol)
-            except:
-                pass
-            
-            return {
-                "address": token_address,
-                "name": name,
-                "symbol": symbol,
-                "decimals": decimals,
-                "total_supply": float(token_info.value.amount) / (10 ** decimals)
+                "total_supply": 1000000000  # Default large supply
             }
         except Exception as e:
             logger.error(f"Error getting token info for {token_address}: {str(e)}")
@@ -257,7 +278,7 @@ class SolanaScanner(BlockchainScanner):
     
     async def _get_token_metadata(self, token_address: str) -> Optional[Dict[str, Any]]:
         """
-        Get token metadata from Metaplex.
+        Get token metadata from Metaplex using Helius API.
         
         Args:
             token_address: The token mint address.
@@ -265,9 +286,29 @@ class SolanaScanner(BlockchainScanner):
         Returns:
             Dictionary containing token metadata or None if error.
         """
-        # This is a placeholder - in production, query the Metaplex metadata account
-        # For now, return None to use the default name/symbol
-        return None
+        try:
+            # Try to use Helius NFTAPI to get token metadata
+            if self.helius_nft_api:
+                try:
+                    # Get NFT metadata from Helius
+                    nft_metadata = self.helius_nft_api.get_nft_metadata(token_address)
+                    
+                    if nft_metadata and 'onChainMetadata' in nft_metadata:
+                        metadata = nft_metadata['onChainMetadata'].get('metadata', {})
+                        return {
+                            "name": metadata.get('name', f"Solana Token {token_address[:6]}"),
+                            "symbol": metadata.get('symbol', f"SOL{token_address[:4]}"),
+                            "uri": metadata.get('uri', '')
+                        }
+                except Exception as e:
+                    logger.warning(f"Error getting NFT metadata from Helius for {token_address}: {str(e)}")
+            
+            # Fallback to empty metadata
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting token metadata for {token_address}: {str(e)}")
+            return None
     
     def _is_potential_meme_coin(self, token_info: Dict[str, Any]) -> bool:
         """

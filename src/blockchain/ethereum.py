@@ -102,7 +102,8 @@ class EthereumScanner(BlockchainScanner):
             latest_block = await self.w3.eth.block_number
             
             # Look back approximately 1 hour (assuming 15-second block time)
-            from_block = latest_block - 240
+            # Convert to hex string format to avoid invalid fromBlock argument issues
+            from_block = hex(latest_block - 240)
             
             # Use get_logs instead of create_filter for better compatibility
             pair_created_event_signature = self.w3.keccak(text="PairCreated(address,address,address,uint256)").hex()
