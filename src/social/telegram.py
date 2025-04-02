@@ -6,9 +6,9 @@ This module implements the SocialMediaMonitor interface for Telegram.
 import asyncio
 import logging
 import re
+import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-import os
 import random
 
 from ..config import MEME_KEYWORDS
@@ -30,8 +30,18 @@ try:
 except ImportError:
     logger.warning("Telethon package not available. Using mock implementation.")
 
-# Get Telegram bot token from environment variables
+# Get Telegram credentials from environment variables
+TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "25254354"))
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "f5f087d0e5a711a51b55bcf8b94fd786")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+# Session file path - check both root and secrets directory
+SESSION_FILE_PATHS = [
+    'coin_scan_session',
+    'secrets/coin_scan_session',
+    '/app/secrets/coin_scan_session',
+    '/app/coin_scan_session'
+]
 
 class TelegramMonitor(SocialMediaMonitor):
     """Telegram social media monitor implementation."""
@@ -51,16 +61,38 @@ class TelegramMonitor(SocialMediaMonitor):
                 return
                 
             try:
+                # Try to find a valid session file
+                session_path = None
+                for path in SESSION_FILE_PATHS:
+                    if os.path.exists(f"{path}.session"):
+                        session_path = path
+                        logger.info(f"Found existing session file at {path}.session")
+                        break
+                
+                if not session_path:
+                    logger.warning("No session file found. Using fallback mechanism.")
+                
+                # Create and start the client
+                self.client = TelegramClient(session_path or 'meme_coin_bot_session', 
+                                            TELEGRAM_API_ID, 
+                                            TELEGRAM_API_HASH)
+                
                 # Check if we have a bot token
                 if TELEGRAM_BOT_TOKEN:
-                    # Create and start the client with bot token
-                    self.client = TelegramClient('meme_coin_bot_session', 12345, "dummy_hash")
                     await self.client.start(bot_token=TELEGRAM_BOT_TOKEN)
                     logger.info("Telegram client initialized successfully with bot token")
                 else:
-                    logger.error("No Telegram bot token provided. Telegram monitoring will be disabled.")
+                    # Try to start with the session file (non-interactive)
+                    await self.client.start()
+                    logger.info("Telegram client initialized successfully with session file")
+                
+                # Test connection
+                me = await self.client.get_me()
+                logger.info(f"Connected as: {me.username if hasattr(me, 'username') else 'Unknown'}")
+                
             except Exception as e:
                 logger.error(f"Error initializing Telegram client: {str(e)}")
+                logger.info("Falling back to mock implementation")
                 self.client = None
     
     async def add_group_to_monitor(self, group_link: str):
@@ -86,16 +118,11 @@ class TelegramMonitor(SocialMediaMonitor):
         """
         logger.info(f"Searching Telegram for mentions of {len(keywords)} keywords")
         
-        # If telethon is not available, return mock data
-        if not TELETHON_AVAILABLE:
+        # If telethon is not available or client initialization failed, return mock data
+        if not TELETHON_AVAILABLE or not self.client:
             return self._generate_mock_mentions(keywords, 3)
         
         mentions = []
-        
-        if not self.client:
-            await self.initialize()
-            if not self.client:
-                return self._generate_mock_mentions(keywords, 3)
         
         try:
             for group in self.monitored_groups:
@@ -204,16 +231,11 @@ class TelegramMonitor(SocialMediaMonitor):
         """
         logger.info(f"Monitoring {len(influencer_accounts)} Telegram influencers")
         
-        # If telethon is not available, return mock data
-        if not TELETHON_AVAILABLE:
+        # If telethon is not available or client initialization failed, return mock data
+        if not TELETHON_AVAILABLE or not self.client:
             return self._generate_mock_influencer_posts(influencer_accounts, 3)
         
         posts = []
-        
-        if not self.client:
-            await self.initialize()
-            if not self.client:
-                return self._generate_mock_influencer_posts(influencer_accounts, 3)
         
         try:
             for influencer in influencer_accounts:

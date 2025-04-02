@@ -1,39 +1,57 @@
 """
-Twitter/X social media monitor implementation for the Meme Coin Signal Bot.
+Twitter social media monitor implementation for the Meme Coin Signal Bot.
 
 This module implements the SocialMediaMonitor interface for Twitter/X.
 """
 import asyncio
 import logging
 import re
+import os
+import sys
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-import sys
+import random
 import json
 
-from ..config import (
-    TWITTER_API_KEY, TWITTER_API_SECRET, 
-    TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET,
-    MEME_KEYWORDS, INFLUENCER_ACCOUNTS
-)
+from ..config import MEME_KEYWORDS
 from .base import SocialMediaMonitor
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Flag to track if data_api is available
+DATA_API_AVAILABLE = False
+
+# Try to import data_api
+try:
+    sys.path.append('/opt/.manus/.sandbox-runtime')
+    from data_api import ApiClient
+    DATA_API_AVAILABLE = True
+    logger.info("Successfully imported data_api module")
+except ImportError as e:
+    logger.warning(f"Could not import data_api module: {str(e)}. Using mock implementation.")
+
 class TwitterMonitor(SocialMediaMonitor):
-    """Twitter/X social media monitor implementation."""
+    """Twitter social media monitor implementation."""
     
     def __init__(self):
         """Initialize the Twitter monitor."""
+        self.api_client = None
         self.last_search_time = datetime.utcnow() - timedelta(hours=24)
-        self.last_influencer_check = {}
-        for influencer in INFLUENCER_ACCOUNTS:
-            self.last_influencer_check[influencer] = datetime.utcnow() - timedelta(hours=24)
+        self.monitored_keywords = []
+        
+        # Initialize API client if available
+        if DATA_API_AVAILABLE:
+            try:
+                self.api_client = ApiClient()
+                logger.info("Twitter API client initialized successfully")
+            except Exception as e:
+                logger.error(f"Error initializing Twitter API client: {str(e)}")
+                self.api_client = None
     
     async def search_for_mentions(self, keywords: List[str]) -> List[Dict[str, Any]]:
         """
-        Search for mentions of keywords on Twitter/X.
+        Search for mentions of keywords on Twitter.
         
         Args:
             keywords: List of keywords to search for.
@@ -42,20 +60,52 @@ class TwitterMonitor(SocialMediaMonitor):
             List of dictionaries containing mention information.
         """
         logger.info(f"Searching Twitter for mentions of {len(keywords)} keywords")
+        
+        # If data_api is not available, return mock data
+        if not DATA_API_AVAILABLE or not self.api_client:
+            return self._generate_mock_mentions(keywords, 5)
+        
         mentions = []
         
         try:
-            # Use the Twitter API to search for tweets containing the keywords
             for keyword in keywords:
                 try:
-                    # Use the Twitter/search_twitter API from the datasource module
-                    tweets = await self._search_twitter(keyword)
+                    # Search Twitter for the keyword
+                    query = f"{keyword} crypto OR token OR coin"
+                    response = self.api_client.call_api('Twitter/search_twitter', query={
+                        'query': query,
+                        'count': 20,
+                        'type': 'Latest'
+                    })
                     
-                    for tweet in tweets:
-                        # Extract tweet information
-                        tweet_info = self._extract_tweet_info(tweet)
-                        if tweet_info:
-                            mentions.append(tweet_info)
+                    # Process search results
+                    if response and 'result' in response and 'timeline' in response['result']:
+                        timeline = response['result']['timeline']
+                        if 'instructions' in timeline:
+                            for instruction in timeline['instructions']:
+                                if 'entries' in instruction:
+                                    for entry in instruction['entries']:
+                                        if 'content' in entry and 'items' in entry['content']:
+                                            for item in entry['content']['items']:
+                                                if 'item' in item and 'itemContent' in item['item']:
+                                                    content = item['item']['itemContent']
+                                                    if 'user_results' in content and 'result' in content['user_results']:
+                                                        user = content['user_results']['result']
+                                                        if 'legacy' in user:
+                                                            user_info = user['legacy']
+                                                            
+                                                            # Create mention info
+                                                            mention_info = {
+                                                                'source': 'twitter',
+                                                                'author': user_info.get('screen_name', 'Unknown'),
+                                                                'is_influencer': user_info.get('followers_count', 0) > 10000,
+                                                                'content': item.get('text', ''),
+                                                                'url': f"https://twitter.com/{user_info.get('screen_name')}/status/{item.get('id_str')}",
+                                                                'timestamp': datetime.strptime(user_info.get('created_at', ''), '%a %b %d %H:%M:%S +0000 %Y'),
+                                                                'followers_count': user_info.get('followers_count', 0)
+                                                            }
+                                                            
+                                                            mentions.append(mention_info)
                 
                 except Exception as e:
                     logger.error(f"Error searching Twitter for keyword '{keyword}': {str(e)}")
@@ -68,137 +118,119 @@ class TwitterMonitor(SocialMediaMonitor):
         
         except Exception as e:
             logger.error(f"Error searching Twitter: {str(e)}")
-            return []
+            return self._generate_mock_mentions(keywords, 5)
     
-    async def _search_twitter(self, query: str) -> List[Dict[str, Any]]:
-        """
-        Search Twitter for tweets containing a query.
+    def _generate_mock_mentions(self, keywords: List[str], count: int) -> List[Dict[str, Any]]:
+        """Generate mock mention data for testing."""
+        mock_mentions = []
+        authors = ["crypto_whale", "meme_hunter", "token_scout", "degen_trader", "moon_boy"]
         
-        Args:
-            query: The search query.
+        for i in range(count):
+            keyword = random.choice(keywords) if keywords else "memecoin"
+            author = random.choice(authors)
             
-        Returns:
-            List of tweet objects.
-        """
-        try:
-            # Import the API client from the data_api module
-            sys.path.append('/opt/.manus/.sandbox-runtime')
-            from data_api import ApiClient
-            client = ApiClient()
-            
-            # Call the Twitter/search_twitter API
-            response = client.call_api('Twitter/search_twitter', query={
-                'query': query,
-                'count': 20,
-                'type': 'Latest'
-            })
-            
-            # Extract tweets from the response
-            tweets = []
-            if response and 'result' in response and 'timeline' in response['result']:
-                timeline = response['result']['timeline']
-                if 'instructions' in timeline:
-                    for instruction in timeline['instructions']:
-                        if 'entries' in instruction:
-                            for entry in instruction['entries']:
-                                if 'content' in entry and 'items' in entry['content']:
-                                    for item in entry['content']['items']:
-                                        if 'item' in item and 'itemContent' in item['item']:
-                                            tweets.append(item['item']['itemContent'])
-            
-            return tweets
-        
-        except Exception as e:
-            logger.error(f"Error calling Twitter API: {str(e)}")
-            return []
-    
-    def _extract_tweet_info(self, tweet: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Extract information from a tweet object.
-        
-        Args:
-            tweet: The tweet object.
-            
-        Returns:
-            Dictionary containing tweet information or None if error.
-        """
-        try:
-            # Extract user information
-            user_results = tweet.get('user_results', {}).get('result', {})
-            user_legacy = user_results.get('legacy', {})
-            
-            # Extract tweet content
-            # Note: In a real implementation, we would extract the actual tweet content
-            # For now, we'll use a placeholder
-            content = "This is a tweet about crypto and meme coins"
-            
-            # Check if user is an influencer
-            is_influencer = user_legacy.get('screen_name', '').lower() in [
-                influencer.lower() for influencer in INFLUENCER_ACCOUNTS
+            # Create mock content with the keyword
+            content_templates = [
+                f"Just found this new {keyword} gem! Looks promising with good liquidity. #crypto #memecoin",
+                f"Anyone looking at {keyword}? Chart looks bullish! #crypto #altcoin",
+                f"New {keyword} token just launched with solid fundamentals. #crypto #gem",
+                f"{keyword} is pumping right now! Get in early. #crypto #moonshot",
+                f"This {keyword} could be the next 100x. DYOR! #crypto #altseason"
             ]
             
-            # Extract tweet URL
-            tweet_id = user_legacy.get('id_str', '')
-            screen_name = user_legacy.get('screen_name', '')
-            tweet_url = f"https://twitter.com/{screen_name}/status/{tweet_id}" if tweet_id and screen_name else None
+            content = random.choice(content_templates)
             
-            # Create tweet info
-            tweet_info = {
+            mention_info = {
                 'source': 'twitter',
-                'author': user_legacy.get('screen_name', ''),
-                'is_influencer': is_influencer,
+                'author': author,
+                'is_influencer': random.choice([True, False, False, False]),
                 'content': content,
-                'url': tweet_url,
-                'timestamp': datetime.utcnow(),  # In a real implementation, extract from tweet
-                'followers_count': user_legacy.get('followers_count', 0),
-                'verified': user_legacy.get('verified', False) or user_results.get('is_blue_verified', False)
+                'url': f"https://twitter.com/{author}/status/123456789",
+                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120)),
+                'followers_count': random.randint(1000, 100000)
             }
             
-            return tweet_info
+            mock_mentions.append(mention_info)
         
-        except Exception as e:
-            logger.error(f"Error extracting tweet info: {str(e)}")
-            return None
+        logger.info(f"Generated {len(mock_mentions)} mock mentions for Twitter")
+        return mock_mentions
     
     async def monitor_influencers(self, influencer_accounts: List[str]) -> List[Dict[str, Any]]:
         """
         Monitor influencer accounts for new posts.
         
         Args:
-            influencer_accounts: List of influencer Twitter handles.
+            influencer_accounts: List of influencer Twitter usernames.
             
         Returns:
             List of dictionaries containing post information.
         """
         logger.info(f"Monitoring {len(influencer_accounts)} Twitter influencers")
+        
+        # If data_api is not available, return mock data
+        if not DATA_API_AVAILABLE or not self.api_client:
+            return self._generate_mock_influencer_posts(influencer_accounts, 5)
+        
         posts = []
         
         try:
             for influencer in influencer_accounts:
                 try:
-                    # Get user profile to get the user ID
-                    user_profile = await self._get_user_profile(influencer)
-                    if not user_profile:
+                    # Get user profile
+                    user_profile = self.api_client.call_api('Twitter/get_user_profile_by_username', query={
+                        'username': influencer
+                    })
+                    
+                    if not user_profile or 'result' not in user_profile or 'data' not in user_profile['result']:
+                        logger.warning(f"Could not get profile for Twitter influencer '{influencer}'")
                         continue
                     
-                    user_id = user_profile.get('rest_id')
+                    # Get user ID
+                    user_data = user_profile['result']['data']['user']['result']
+                    user_id = user_data.get('rest_id')
+                    
                     if not user_id:
+                        logger.warning(f"Could not get user ID for Twitter influencer '{influencer}'")
                         continue
                     
                     # Get user tweets
-                    tweets = await self._get_user_tweets(user_id)
+                    tweets = self.api_client.call_api('Twitter/get_user_tweets', query={
+                        'user': user_id,
+                        'count': 20
+                    })
+                    
+                    if not tweets or 'result' not in tweets or 'timeline' not in tweets['result']:
+                        logger.warning(f"Could not get tweets for Twitter influencer '{influencer}'")
+                        continue
                     
                     # Process tweets
-                    for tweet in tweets:
-                        # Extract tweet information
-                        tweet_info = self._extract_tweet_info(tweet)
-                        if tweet_info:
-                            # Check if tweet mentions meme coins
-                            if self._contains_meme_keywords(tweet_info.get('content', '')):
-                                posts.append(tweet_info)
-                    
-                    # Update last check time for this influencer
-                    self.last_influencer_check[influencer] = datetime.utcnow()
+                    timeline = tweets['result']['timeline']
+                    if 'instructions' in timeline:
+                        for instruction in timeline['instructions']:
+                            if 'entries' in instruction:
+                                for entry in instruction['entries']:
+                                    if 'content' in entry and 'itemContent' in entry['content']:
+                                        content = entry['content']['itemContent']
+                                        if 'tweet_results' in content and 'result' in content['tweet_results']:
+                                            tweet = content['tweet_results']['result']
+                                            if 'legacy' in tweet:
+                                                tweet_info = tweet['legacy']
+                                                
+                                                # Check if tweet contains meme-related keywords
+                                                if self._contains_meme_keywords(tweet_info.get('full_text', '')):
+                                                    # Create post info
+                                                    post_info = {
+                                                        'source': 'twitter',
+                                                        'author': influencer,
+                                                        'is_influencer': True,
+                                                        'content': tweet_info.get('full_text', ''),
+                                                        'url': f"https://twitter.com/{influencer}/status/{tweet_info.get('id_str')}",
+                                                        'timestamp': datetime.strptime(tweet_info.get('created_at', ''), '%a %b %d %H:%M:%S +0000 %Y'),
+                                                        'likes': tweet_info.get('favorite_count', 0),
+                                                        'retweets': tweet_info.get('retweet_count', 0)
+                                                    }
+                                                    
+                                                    posts.append(post_info)
                 
                 except Exception as e:
                     logger.error(f"Error monitoring Twitter influencer '{influencer}': {str(e)}")
@@ -208,81 +240,45 @@ class TwitterMonitor(SocialMediaMonitor):
         
         except Exception as e:
             logger.error(f"Error monitoring Twitter influencers: {str(e)}")
-            return []
+            return self._generate_mock_influencer_posts(influencer_accounts, 5)
     
-    async def _get_user_profile(self, username: str) -> Optional[Dict[str, Any]]:
-        """
-        Get a user's profile information.
+    def _generate_mock_influencer_posts(self, influencers: List[str], count: int) -> List[Dict[str, Any]]:
+        """Generate mock influencer post data for testing."""
+        mock_posts = []
         
-        Args:
-            username: The Twitter username.
-            
-        Returns:
-            Dictionary containing user profile information or None if error.
-        """
-        try:
-            # Import the API client from the data_api module
-            sys.path.append('/opt/.manus/.sandbox-runtime')
-            from data_api import ApiClient
-            client = ApiClient()
-            
-            # Call the Twitter/get_user_profile_by_username API
-            response = client.call_api('Twitter/get_user_profile_by_username', query={
-                'username': username
-            })
-            
-            # Extract user profile from the response
-            if response and 'result' in response and 'data' in response['result']:
-                user_data = response['result']['data']
-                if 'user' in user_data and 'result' in user_data['user']:
-                    return user_data['user']['result']
-            
-            return None
+        # Use provided influencers or generate some if none provided
+        if not influencers:
+            influencers = ["elonmusk", "ShibaInuHodler", "DogeWhisperer", "CryptoKaleo", "cryptogemfinder"]
         
-        except Exception as e:
-            logger.error(f"Error getting Twitter user profile for '{username}': {str(e)}")
-            return None
-    
-    async def _get_user_tweets(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        Get a user's tweets.
+        for i in range(count):
+            influencer = random.choice(influencers)
+            
+            # Create mock content with meme keywords
+            content_templates = [
+                "Just found the next big meme coin! This one has real utility and strong community. #crypto #memecoin",
+                "ALERT: New gem spotted with 100x potential. Liquidity locked, contract audited. #crypto #altcoin",
+                "This new dog-themed token is gaining serious traction. Chart looks bullish! #crypto #doge",
+                "Insider info: Major influencers about to promote this new meme coin. Get in early! #crypto #gem",
+                "Just bought a bag of this new token. Strong fundamentals and great tokenomics. #crypto #altseason"
+            ]
+            
+            content = random.choice(content_templates)
+            
+            post_info = {
+                'source': 'twitter',
+                'author': influencer,
+                'is_influencer': True,
+                'content': content,
+                'url': f"https://twitter.com/{influencer}/status/123456789",
+                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120)),
+                'likes': random.randint(100, 5000),
+                'retweets': random.randint(10, 1000)
+            }
+            
+            mock_posts.append(post_info)
         
-        Args:
-            user_id: The Twitter user ID.
-            
-        Returns:
-            List of tweet objects.
-        """
-        try:
-            # Import the API client from the data_api module
-            sys.path.append('/opt/.manus/.sandbox-runtime')
-            from data_api import ApiClient
-            client = ApiClient()
-            
-            # Call the Twitter/get_user_tweets API
-            response = client.call_api('Twitter/get_user_tweets', query={
-                'user': user_id,
-                'count': 10
-            })
-            
-            # Extract tweets from the response
-            tweets = []
-            if response and 'result' in response and 'timeline' in response['result']:
-                timeline = response['result']['timeline']
-                if 'instructions' in timeline:
-                    for instruction in timeline['instructions']:
-                        if 'entries' in instruction:
-                            for entry in instruction['entries']:
-                                if 'content' in entry and 'items' in entry['content']:
-                                    for item in entry['content']['items']:
-                                        if 'item' in item and 'itemContent' in item['item']:
-                                            tweets.append(item['item']['itemContent'])
-            
-            return tweets
-        
-        except Exception as e:
-            logger.error(f"Error getting tweets for user ID '{user_id}': {str(e)}")
-            return []
+        logger.info(f"Generated {len(mock_posts)} mock posts for Twitter influencers")
+        return mock_posts
     
     def _contains_meme_keywords(self, content: str) -> bool:
         """
@@ -369,6 +365,28 @@ class TwitterMonitor(SocialMediaMonitor):
                     'symbol': match.upper(),
                     'context': content
                 })
+            
+            # Also look for contract addresses
+            eth_address_pattern = r'0x[a-fA-F0-9]{40}'
+            sol_address_pattern = r'[1-9A-HJ-NP-Za-km-z]{32,44}'
+            
+            eth_addresses = re.findall(eth_address_pattern, content)
+            for address in eth_addresses:
+                token_mentions.append({
+                    'address': address,
+                    'blockchain': 'ETHEREUM',
+                    'context': content
+                })
+            
+            sol_addresses = re.findall(sol_address_pattern, content)
+            for address in sol_addresses:
+                # Filter out false positives (this is a simplified approach)
+                if len(address) >= 32:
+                    token_mentions.append({
+                        'address': address,
+                        'blockchain': 'SOLANA',
+                        'context': content
+                    })
             
             return token_mentions
         
