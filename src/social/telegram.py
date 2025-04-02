@@ -318,6 +318,128 @@ class TelegramMonitor(SocialMediaMonitor):
         logger.info(f"Generated {len(mock_posts)} mock influencer posts for Telegram")
         return mock_posts
     
+    async def analyze_sentiment(self, content: str) -> float:
+        """
+        Analyze the sentiment of a social media post.
+        
+        Args:
+            content: The text content of the post.
+            
+        Returns:
+            Sentiment score between -1.0 (negative) and 1.0 (positive).
+        """
+        logger.info(f"Analyzing sentiment for Telegram content")
+        
+        # Simple rule-based sentiment analysis
+        # In a production environment, this would use a proper NLP model
+        positive_words = [
+            "bullish", "moon", "gem", "100x", "1000x", "pump", "buy", "good", "great", "excellent",
+            "amazing", "solid", "strong", "promising", "potential", "opportunity", "early", "gains",
+            "profit", "winner", "winning", "success", "successful", "up", "rising", "rise", "green"
+        ]
+        
+        negative_words = [
+            "bearish", "dump", "sell", "bad", "poor", "weak", "scam", "rug", "rugpull", "ponzi",
+            "avoid", "stay away", "risky", "risk", "dangerous", "suspicious", "red flag", "warning",
+            "crash", "down", "falling", "fall", "red", "loss", "losing", "fail", "failure"
+        ]
+        
+        # Convert to lowercase for case-insensitive matching
+        content_lower = content.lower()
+        
+        # Count positive and negative words
+        positive_count = sum(1 for word in positive_words if word in content_lower)
+        negative_count = sum(1 for word in negative_words if word in content_lower)
+        
+        # Calculate sentiment score
+        total_count = positive_count + negative_count
+        if total_count == 0:
+            return 0.0  # Neutral sentiment
+        
+        sentiment_score = (positive_count - negative_count) / total_count
+        
+        # Ensure score is between -1.0 and 1.0
+        sentiment_score = max(-1.0, min(1.0, sentiment_score))
+        
+        logger.info(f"Sentiment score: {sentiment_score}")
+        return sentiment_score
+    
+    async def extract_token_mentions(self, content: str) -> List[Dict[str, Any]]:
+        """
+        Extract token mentions from a social media post.
+        
+        Args:
+            content: The text content of the post.
+            
+        Returns:
+            List of dictionaries containing token information.
+        """
+        logger.info(f"Extracting token mentions from Telegram content")
+        
+        # Regular expressions for finding token mentions
+        # This is a simplified approach; a more sophisticated NLP approach would be better
+        
+        # Match $SYMBOL pattern (common in crypto)
+        dollar_symbol_pattern = r'\$([A-Za-z0-9]{2,10})'
+        
+        # Match "Token/Coin Name" followed by optional (SYMBOL)
+        token_name_pattern = r'([A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)*)\s*(?:\(([A-Z0-9]{2,10})\))?'
+        
+        # Match contract addresses (Ethereum-style)
+        contract_address_pattern = r'0x[a-fA-F0-9]{40}'
+        
+        mentions = []
+        
+        # Find $SYMBOL mentions
+        dollar_symbols = re.findall(dollar_symbol_pattern, content)
+        for symbol in dollar_symbols:
+            mentions.append({
+                'symbol': symbol.upper(),
+                'name': None,
+                'address': None,
+                'mention_type': 'symbol',
+                'confidence': 0.9  # High confidence for $SYMBOL format
+            })
+        
+        # Find token name mentions
+        token_names = re.findall(token_name_pattern, content)
+        for name_match in token_names:
+            name, symbol = name_match
+            # Skip common words that might be mistaken for token names
+            common_words = ["THE", "AND", "THIS", "THAT", "JUST", "LIKE", "WITH", "FOR"]
+            if name.upper() in common_words:
+                continue
+                
+            mentions.append({
+                'symbol': symbol.upper() if symbol else None,
+                'name': name,
+                'address': None,
+                'mention_type': 'name',
+                'confidence': 0.7 if symbol else 0.5  # Higher confidence if symbol is included
+            })
+        
+        # Find contract addresses
+        addresses = re.findall(contract_address_pattern, content)
+        for address in addresses:
+            mentions.append({
+                'symbol': None,
+                'name': None,
+                'address': address.lower(),
+                'mention_type': 'address',
+                'confidence': 0.95  # Very high confidence for addresses
+            })
+        
+        # Remove duplicates (prefer higher confidence)
+        unique_mentions = {}
+        for mention in mentions:
+            key = mention['symbol'] or mention['name'] or mention['address']
+            if key and (key not in unique_mentions or mention['confidence'] > unique_mentions[key]['confidence']):
+                unique_mentions[key] = mention
+        
+        result = list(unique_mentions.values())
+        logger.info(f"Extracted {len(result)} token mentions")
+        return result
+    
     async def close(self):
         """Close the Telegram client."""
         if self.client:
