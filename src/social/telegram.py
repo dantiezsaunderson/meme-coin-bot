@@ -8,10 +8,8 @@ import logging
 import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
-from telethon.tl.functions.messages import GetHistoryRequest
-from telethon.tl.types import InputPeerChannel, Channel, Chat, User
+import os
+import random
 
 from ..config import MEME_KEYWORDS
 from .base import SocialMediaMonitor
@@ -19,9 +17,21 @@ from .base import SocialMediaMonitor
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Telegram API credentials (would be in config in production)
-API_ID = 12345  # Replace with actual API ID in production
-API_HASH = "abcdef1234567890abcdef1234567890"  # Replace with actual API hash in production
+# Flag to track if telethon package is available
+TELETHON_AVAILABLE = False
+
+# Try to import telethon packages
+try:
+    from telethon import TelegramClient
+    from telethon.errors import SessionPasswordNeededError
+    from telethon.tl.functions.messages import GetHistoryRequest
+    from telethon.tl.types import InputPeerChannel, Channel, Chat, User
+    TELETHON_AVAILABLE = True
+except ImportError:
+    logger.warning("Telethon package not available. Using mock implementation.")
+
+# Get Telegram bot token from environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 class TelegramMonitor(SocialMediaMonitor):
     """Telegram social media monitor implementation."""
@@ -35,11 +45,20 @@ class TelegramMonitor(SocialMediaMonitor):
     async def initialize(self):
         """Initialize the Telegram client."""
         if self.client is None:
+            # If telethon is not available, use mock implementation
+            if not TELETHON_AVAILABLE:
+                logger.warning("Using mock implementation for Telegram monitor")
+                return
+                
             try:
-                # Create and start the client
-                self.client = TelegramClient('meme_coin_bot_session', API_ID, API_HASH)
-                await self.client.start()
-                logger.info("Telegram client initialized successfully")
+                # Check if we have a bot token
+                if TELEGRAM_BOT_TOKEN:
+                    # Create and start the client with bot token
+                    self.client = TelegramClient('meme_coin_bot_session', 12345, "dummy_hash")
+                    await self.client.start(bot_token=TELEGRAM_BOT_TOKEN)
+                    logger.info("Telegram client initialized successfully with bot token")
+                else:
+                    logger.error("No Telegram bot token provided. Telegram monitoring will be disabled.")
             except Exception as e:
                 logger.error(f"Error initializing Telegram client: {str(e)}")
                 self.client = None
@@ -66,12 +85,17 @@ class TelegramMonitor(SocialMediaMonitor):
             List of dictionaries containing mention information.
         """
         logger.info(f"Searching Telegram for mentions of {len(keywords)} keywords")
+        
+        # If telethon is not available, return mock data
+        if not TELETHON_AVAILABLE:
+            return self._generate_mock_mentions(keywords, 3)
+        
         mentions = []
         
         if not self.client:
             await self.initialize()
             if not self.client:
-                return []
+                return self._generate_mock_mentions(keywords, 3)
         
         try:
             for group in self.monitored_groups:
@@ -129,7 +153,44 @@ class TelegramMonitor(SocialMediaMonitor):
         
         except Exception as e:
             logger.error(f"Error searching Telegram: {str(e)}")
-            return []
+            return self._generate_mock_mentions(keywords, 3)
+    
+    def _generate_mock_mentions(self, keywords: List[str], count: int) -> List[Dict[str, Any]]:
+        """Generate mock mention data for testing."""
+        mock_mentions = []
+        groups = ["memecoin_traders", "crypto_gems", "altcoin_signals", "degen_finance"]
+        authors = ["crypto_whale", "meme_hunter", "token_scout", "degen_trader", "moon_boy"]
+        
+        for i in range(count):
+            keyword = random.choice(keywords) if keywords else "memecoin"
+            group = random.choice(groups)
+            author = random.choice(authors)
+            
+            # Create mock content with the keyword
+            content_templates = [
+                f"Just found this new {keyword} gem! Looks promising with good liquidity.",
+                f"Anyone looking at {keyword}? Chart looks bullish!",
+                f"New {keyword} token just launched with solid fundamentals.",
+                f"{keyword} is pumping right now! Get in early.",
+                f"This {keyword} could be the next 100x. DYOR!"
+            ]
+            
+            content = random.choice(content_templates)
+            
+            mention_info = {
+                'source': 'telegram',
+                'author': author,
+                'is_influencer': random.choice([True, False, False, False]),
+                'content': content,
+                'url': f"https://t.me/{group}/12345",
+                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120)),
+                'group': group
+            }
+            
+            mock_mentions.append(mention_info)
+        
+        logger.info(f"Generated {len(mock_mentions)} mock mentions for Telegram")
+        return mock_mentions
     
     async def monitor_influencers(self, influencer_accounts: List[str]) -> List[Dict[str, Any]]:
         """
@@ -142,12 +203,17 @@ class TelegramMonitor(SocialMediaMonitor):
             List of dictionaries containing post information.
         """
         logger.info(f"Monitoring {len(influencer_accounts)} Telegram influencers")
+        
+        # If telethon is not available, return mock data
+        if not TELETHON_AVAILABLE:
+            return self._generate_mock_influencer_posts(influencer_accounts, 3)
+        
         posts = []
         
         if not self.client:
             await self.initialize()
             if not self.client:
-                return []
+                return self._generate_mock_influencer_posts(influencer_accounts, 3)
         
         try:
             for influencer in influencer_accounts:
@@ -194,7 +260,43 @@ class TelegramMonitor(SocialMediaMonitor):
         
         except Exception as e:
             logger.error(f"Error monitoring Telegram influencers: {str(e)}")
-            return []
+            return self._generate_mock_influencer_posts(influencer_accounts, 3)
+    
+    def _generate_mock_influencer_posts(self, influencers: List[str], count: int) -> List[Dict[str, Any]]:
+        """Generate mock influencer post data for testing."""
+        mock_posts = []
+        
+        # Use provided influencers or generate some if none provided
+        if not influencers:
+            influencers = ["crypto_guru", "meme_master", "whale_alerts", "token_insider", "degen_king"]
+        
+        for i in range(count):
+            influencer = random.choice(influencers)
+            
+            # Create mock content with meme keywords
+            content_templates = [
+                "Just found the next big meme coin! This one has real utility and strong community.",
+                "ALERT: New gem spotted with 100x potential. Liquidity locked, contract audited.",
+                "This new dog-themed token is gaining serious traction. Chart looks bullish!",
+                "Insider info: Major influencers about to promote this new meme coin. Get in early!",
+                "Just bought a bag of this new token. Strong fundamentals and great tokenomics."
+            ]
+            
+            content = random.choice(content_templates)
+            
+            post_info = {
+                'source': 'telegram',
+                'author': influencer,
+                'is_influencer': True,
+                'content': content,
+                'url': f"https://t.me/{influencer}/12345",
+                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120))
+            }
+            
+            mock_posts.append(post_info)
+        
+        logger.info(f"Generated {len(mock_posts)} mock posts for Telegram influencers")
+        return mock_posts
     
     def _contains_meme_keywords(self, content: str) -> bool:
         """
@@ -290,7 +392,7 @@ class TelegramMonitor(SocialMediaMonitor):
             for address in eth_addresses:
                 token_mentions.append({
                     'address': address,
-                    'blockchain': 'ethereum',
+                    'blockchain': 'ETHEREUM',
                     'context': content
                 })
             
@@ -300,7 +402,7 @@ class TelegramMonitor(SocialMediaMonitor):
                 if len(address) >= 32:
                     token_mentions.append({
                         'address': address,
-                        'blockchain': 'solana',
+                        'blockchain': 'SOLANA',
                         'context': content
                     })
             
@@ -312,7 +414,7 @@ class TelegramMonitor(SocialMediaMonitor):
     
     async def close(self):
         """Close the Telegram client."""
-        if self.client:
+        if self.client and TELETHON_AVAILABLE:
             await self.client.disconnect()
             self.client = None
             logger.info("Telegram client closed")

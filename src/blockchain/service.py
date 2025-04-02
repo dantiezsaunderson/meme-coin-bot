@@ -54,11 +54,11 @@ class BlockchainScannerService:
             try:
                 # Scan Ethereum if scanner is available
                 if self.ethereum_scanner:
-                    await self._scan_blockchain('ethereum')
+                    await self._scan_blockchain(BlockchainType.ETHEREUM)
                 
                 # Scan Solana if scanner is available
                 if self.solana_scanner:
-                    await self._scan_blockchain('solana')
+                    await self._scan_blockchain(BlockchainType.SOLANA)
                 
                 # Wait for next scan
                 logger.info(f"Blockchain scan completed. Next scan in {BLOCKCHAIN_SCAN_INTERVAL} seconds")
@@ -73,25 +73,25 @@ class BlockchainScannerService:
         self.running = False
         logger.info("Stopping blockchain scanner service")
     
-    async def _scan_blockchain(self, blockchain_type: str):
+    async def _scan_blockchain(self, blockchain_type: BlockchainType):
         """
         Scan a blockchain for new tokens and update the database.
         
         Args:
-            blockchain_type: The blockchain type ('ethereum' or 'solana').
+            blockchain_type: The blockchain type (BlockchainType.ETHEREUM or BlockchainType.SOLANA).
         """
-        logger.info(f"Scanning {blockchain_type} blockchain")
+        logger.info(f"Scanning {blockchain_type.name} blockchain")
         
         try:
             # Get the appropriate scanner
-            scanner = self.ethereum_scanner if blockchain_type == 'ethereum' else self.solana_scanner
+            scanner = self.ethereum_scanner if blockchain_type == BlockchainType.ETHEREUM else self.solana_scanner
             if not scanner:
-                logger.warning(f"No scanner available for {blockchain_type}. Skipping scan.")
+                logger.warning(f"No scanner available for {blockchain_type.name}. Skipping scan.")
                 return
             
             # Scan for new tokens
             new_tokens = await scanner.scan_for_new_tokens()
-            logger.info(f"Found {len(new_tokens)} new tokens on {blockchain_type}")
+            logger.info(f"Found {len(new_tokens)} new tokens on {blockchain_type.name}")
             
             # Process each new token
             for token_info in new_tokens:
@@ -101,7 +101,7 @@ class BlockchainScannerService:
             await self._update_existing_tokens(blockchain_type, scanner)
         
         except Exception as e:
-            logger.error(f"Error scanning {blockchain_type} blockchain: {str(e)}")
+            logger.error(f"Error scanning {blockchain_type.name} blockchain: {str(e)}")
     
     async def _process_token(self, token_info: Dict[str, Any], scanner):
         """
@@ -158,12 +158,15 @@ class BlockchainScannerService:
                     'contract_audit_score': 0.0
                 }
             
+            # Ensure blockchain type is the enum value, not string
+            blockchain_enum = BlockchainType.ETHEREUM if token_info['blockchain'].upper() == 'ETHEREUM' else BlockchainType.SOLANA
+            
             # Create new token
             new_token = Token(
                 address=token_address,
                 name=token_info.get('name', ''),
                 symbol=token_info.get('symbol', ''),
-                blockchain=token_info['blockchain'],
+                blockchain=blockchain_enum,
                 
                 # Contract details
                 contract_verified=safety_check.get('contract_verified', False),
@@ -189,7 +192,7 @@ class BlockchainScannerService:
             # Add to database
             session.add(new_token)
             session.commit()
-            logger.info(f"Added new token: {new_token.symbol} ({new_token.blockchain})")
+            logger.info(f"Added new token: {new_token.symbol} ({new_token.blockchain.name})")
         
         except Exception as e:
             logger.error(f"Error processing token {token_info.get('symbol', 'unknown')}: {str(e)}")
@@ -199,12 +202,12 @@ class BlockchainScannerService:
             if 'session' in locals():
                 session.close()
     
-    async def _update_existing_tokens(self, blockchain_type: str, scanner):
+    async def _update_existing_tokens(self, blockchain_type: BlockchainType, scanner):
         """
         Update existing tokens in the database.
         
         Args:
-            blockchain_type: The blockchain type ('ethereum' or 'solana').
+            blockchain_type: The blockchain type (BlockchainType.ETHEREUM or BlockchainType.SOLANA).
             scanner: The blockchain scanner instance.
         """
         try:
@@ -213,7 +216,7 @@ class BlockchainScannerService:
             
             # Get tokens for this blockchain
             tokens = session.query(Token).filter(Token.blockchain == blockchain_type).all()
-            logger.info(f"Updating {len(tokens)} existing tokens on {blockchain_type}")
+            logger.info(f"Updating {len(tokens)} existing tokens on {blockchain_type.name}")
             
             # Update each token
             for token in tokens:
@@ -265,7 +268,7 @@ class BlockchainScannerService:
                     session.rollback()
         
         except Exception as e:
-            logger.error(f"Error updating existing tokens on {blockchain_type}: {str(e)}")
+            logger.error(f"Error updating existing tokens on {blockchain_type.name}: {str(e)}")
             if 'session' in locals():
                 session.rollback()
         finally:
