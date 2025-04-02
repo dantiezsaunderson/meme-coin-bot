@@ -22,8 +22,8 @@ class BlockchainScannerService:
     
     def __init__(self):
         """Initialize the blockchain scanner service."""
-        self.ethereum_scanner = get_scanner('ethereum')
-        self.solana_scanner = get_scanner('solana')
+        self.ethereum_scanner = None
+        self.solana_scanner = None
         self.running = False
     
     async def start(self):
@@ -31,13 +31,34 @@ class BlockchainScannerService:
         self.running = True
         logger.info("Starting blockchain scanner service")
         
+        # Initialize scanners with error handling
+        try:
+            self.ethereum_scanner = get_scanner('ethereum')
+            logger.info("Ethereum scanner initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Ethereum scanner: {str(e)}")
+            self.ethereum_scanner = None
+        
+        try:
+            self.solana_scanner = get_scanner('solana')
+            logger.info("Solana scanner initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Solana scanner: {str(e)}")
+            self.solana_scanner = None
+        
+        if not self.ethereum_scanner and not self.solana_scanner:
+            logger.error("No blockchain scanners could be initialized. Service will not scan blockchains.")
+            return
+        
         while self.running:
             try:
-                # Scan Ethereum
-                await self._scan_blockchain('ethereum')
+                # Scan Ethereum if scanner is available
+                if self.ethereum_scanner:
+                    await self._scan_blockchain('ethereum')
                 
-                # Scan Solana
-                await self._scan_blockchain('solana')
+                # Scan Solana if scanner is available
+                if self.solana_scanner:
+                    await self._scan_blockchain('solana')
                 
                 # Wait for next scan
                 logger.info(f"Blockchain scan completed. Next scan in {BLOCKCHAIN_SCAN_INTERVAL} seconds")
@@ -63,7 +84,10 @@ class BlockchainScannerService:
         
         try:
             # Get the appropriate scanner
-            scanner = get_scanner(blockchain_type)
+            scanner = self.ethereum_scanner if blockchain_type == 'ethereum' else self.solana_scanner
+            if not scanner:
+                logger.warning(f"No scanner available for {blockchain_type}. Skipping scan.")
+                return
             
             # Scan for new tokens
             new_tokens = await scanner.scan_for_new_tokens()
@@ -74,7 +98,7 @@ class BlockchainScannerService:
                 await self._process_token(token_info, scanner)
             
             # Update existing tokens
-            await self._update_existing_tokens(blockchain_type)
+            await self._update_existing_tokens(blockchain_type, scanner)
         
         except Exception as e:
             logger.error(f"Error scanning {blockchain_type} blockchain: {str(e)}")
@@ -99,11 +123,40 @@ class BlockchainScannerService:
             
             # Get additional token information
             token_address = token_info['address']
-            price = await scanner.get_token_price(token_address)
-            volume = await scanner.get_token_volume(token_address)
-            buy_sell_ratio = await scanner.get_buy_sell_ratio(token_address)
-            holders_count = await scanner.get_holder_count(token_address)
-            safety_check = await scanner.check_contract_safety(token_address)
+            
+            try:
+                price = await scanner.get_token_price(token_address)
+            except Exception as e:
+                logger.warning(f"Error getting price for {token_info.get('symbol', 'unknown')}: {str(e)}")
+                price = 0.0
+            
+            try:
+                volume = await scanner.get_token_volume(token_address)
+            except Exception as e:
+                logger.warning(f"Error getting volume for {token_info.get('symbol', 'unknown')}: {str(e)}")
+                volume = 0.0
+            
+            try:
+                buy_sell_ratio = await scanner.get_buy_sell_ratio(token_address)
+            except Exception as e:
+                logger.warning(f"Error getting buy/sell ratio for {token_info.get('symbol', 'unknown')}: {str(e)}")
+                buy_sell_ratio = 1.0
+            
+            try:
+                holders_count = await scanner.get_holder_count(token_address)
+            except Exception as e:
+                logger.warning(f"Error getting holder count for {token_info.get('symbol', 'unknown')}: {str(e)}")
+                holders_count = 0
+            
+            try:
+                safety_check = await scanner.check_contract_safety(token_address)
+            except Exception as e:
+                logger.warning(f"Error checking contract safety for {token_info.get('symbol', 'unknown')}: {str(e)}")
+                safety_check = {
+                    'contract_verified': False,
+                    'is_honeypot': False,
+                    'contract_audit_score': 0.0
+                }
             
             # Create new token
             new_token = Token(
@@ -146,12 +199,13 @@ class BlockchainScannerService:
             if 'session' in locals():
                 session.close()
     
-    async def _update_existing_tokens(self, blockchain_type: str):
+    async def _update_existing_tokens(self, blockchain_type: str, scanner):
         """
         Update existing tokens in the database.
         
         Args:
             blockchain_type: The blockchain type ('ethereum' or 'solana').
+            scanner: The blockchain scanner instance.
         """
         try:
             # Get a database session
@@ -161,18 +215,39 @@ class BlockchainScannerService:
             tokens = session.query(Token).filter(Token.blockchain == blockchain_type).all()
             logger.info(f"Updating {len(tokens)} existing tokens on {blockchain_type}")
             
-            # Get the appropriate scanner
-            scanner = get_scanner(blockchain_type)
-            
             # Update each token
             for token in tokens:
                 try:
                     # Get updated token information
-                    price = await scanner.get_token_price(token.address)
-                    volume = await scanner.get_token_volume(token.address)
-                    liquidity = await scanner.get_token_liquidity(token.address)
-                    buy_sell_ratio = await scanner.get_buy_sell_ratio(token.address)
-                    holders_count = await scanner.get_holder_count(token.address)
+                    try:
+                        price = await scanner.get_token_price(token.address)
+                    except Exception as e:
+                        logger.warning(f"Error getting price for {token.symbol}: {str(e)}")
+                        price = token.current_price_usd
+                    
+                    try:
+                        volume = await scanner.get_token_volume(token.address)
+                    except Exception as e:
+                        logger.warning(f"Error getting volume for {token.symbol}: {str(e)}")
+                        volume = token.volume_24h_usd
+                    
+                    try:
+                        liquidity = await scanner.get_token_liquidity(token.address)
+                    except Exception as e:
+                        logger.warning(f"Error getting liquidity for {token.symbol}: {str(e)}")
+                        liquidity = token.liquidity_usd
+                    
+                    try:
+                        buy_sell_ratio = await scanner.get_buy_sell_ratio(token.address)
+                    except Exception as e:
+                        logger.warning(f"Error getting buy/sell ratio for {token.symbol}: {str(e)}")
+                        buy_sell_ratio = token.buy_sell_ratio
+                    
+                    try:
+                        holders_count = await scanner.get_holder_count(token.address)
+                    except Exception as e:
+                        logger.warning(f"Error getting holder count for {token.symbol}: {str(e)}")
+                        holders_count = token.holders_count
                     
                     # Update token
                     token.current_price_usd = price

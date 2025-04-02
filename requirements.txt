@@ -1,38 +1,14 @@
-# Telegram Bot
 python-telegram-bot>=20.0
+fastapi>=0.95.0
+uvicorn>=0.21.0
+sqlalchemy>=2.0.0
 python-dotenv>=1.0.0
-
-# Blockchain Data
 web3>=6.0.0
 solana>=0.30.0
-pycoingecko>=3.0.0
-
-# Data Analysis
+requests>=2.28.0
 pandas>=2.0.0
 numpy>=1.24.0
-scikit-learn>=1.2.0
-
-# API and Web
-fastapi>=0.100.0
-uvicorn>=0.22.0
-httpx>=0.24.0
-aiohttp>=3.8.4
-
-# Social Media Monitoring
-tweepy>=4.14.0
-telethon>=1.28.0
-
-# Database
-sqlalchemy>=2.0.0
-alembic>=1.11.0
-
-# Visualization (for optional dashboard)
 streamlit>=1.22.0
 plotly>=5.14.0
-
-# Testing
-pytest>=7.3.1
-pytest-asyncio>=0.21.0
-
-# Deployment
-gunicorn>=21.2.0
+telethon>=1.28.0
+aiohttp>=3.8.0

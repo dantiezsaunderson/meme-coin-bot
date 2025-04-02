@@ -9,6 +9,7 @@ import os
 import uvicorn
 from dotenv import load_dotenv
 from threading import Thread
+import sys
 
 from src.database import init_db
 from src.blockchain.service import scanner_service
@@ -33,48 +34,78 @@ def run_health_api():
 
 async def main():
     """Initialize and start all services."""
-    # Load environment variables
-    load_dotenv()
-    
-    # Initialize database
-    logger.info("Initializing database...")
-    init_db()
-    
-    # Start health API in a separate thread
-    logger.info(f"Starting health API on port {HEALTH_API_PORT}...")
-    health_thread = Thread(target=run_health_api, daemon=True)
-    health_thread.start()
-    
-    # Start services
-    tasks = []
-    
-    # Start blockchain scanner service
-    logger.info("Starting blockchain scanner service...")
-    tasks.append(asyncio.create_task(scanner_service.start()))
-    
-    # Start social media monitoring service
-    logger.info("Starting social media monitoring service...")
-    tasks.append(asyncio.create_task(social_monitoring_service.start()))
-    
-    # Start scoring service
-    logger.info("Starting scoring service...")
-    tasks.append(asyncio.create_task(scoring_service.start()))
-    
-    # Start Telegram bot
-    logger.info("Starting Telegram bot...")
-    tasks.append(asyncio.create_task(telegram_bot.start()))
-    
-    # Wait for all tasks to complete
     try:
-        await asyncio.gather(*tasks)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        # Load environment variables
+        load_dotenv()
         
-        # Stop all services
-        await scanner_service.stop()
-        await social_monitoring_service.stop()
-        await scoring_service.stop()
-        await telegram_bot.stop()
+        # Create data directory if it doesn't exist
+        os.makedirs('data', exist_ok=True)
+        
+        # Initialize database
+        logger.info("Initializing database...")
+        init_db()
+        
+        # Start health API in a separate thread
+        logger.info(f"Starting health API on port {HEALTH_API_PORT}...")
+        health_thread = Thread(target=run_health_api, daemon=True)
+        health_thread.start()
+        
+        # Start services
+        tasks = []
+        
+        # Start blockchain scanner service with error handling
+        try:
+            logger.info("Starting blockchain scanner service...")
+            tasks.append(asyncio.create_task(scanner_service.start()))
+        except Exception as e:
+            logger.error(f"Failed to start blockchain scanner service: {str(e)}")
+            logger.info("Continuing without blockchain scanner service...")
+        
+        # Start social media monitoring service with error handling
+        try:
+            logger.info("Starting social media monitoring service...")
+            tasks.append(asyncio.create_task(social_monitoring_service.start()))
+        except Exception as e:
+            logger.error(f"Failed to start social media monitoring service: {str(e)}")
+            logger.info("Continuing without social media monitoring service...")
+        
+        # Start scoring service with error handling
+        try:
+            logger.info("Starting scoring service...")
+            tasks.append(asyncio.create_task(scoring_service.start()))
+        except Exception as e:
+            logger.error(f"Failed to start scoring service: {str(e)}")
+            logger.info("Continuing without scoring service...")
+        
+        # Start Telegram bot with error handling
+        try:
+            logger.info("Starting Telegram bot...")
+            tasks.append(asyncio.create_task(telegram_bot.start()))
+        except Exception as e:
+            logger.error(f"Failed to start Telegram bot: {str(e)}")
+            logger.info("Continuing without Telegram bot...")
+        
+        if not tasks:
+            logger.error("No services could be started. Exiting...")
+            return
+        
+        # Wait for all tasks to complete
+        try:
+            await asyncio.gather(*tasks)
+        except KeyboardInterrupt:
+            logger.info("Shutting down...")
+            
+            # Stop all services
+            await scanner_service.stop()
+            await social_monitoring_service.stop()
+            await scoring_service.stop()
+            await telegram_bot.stop()
+        except Exception as e:
+            logger.error(f"Error in main loop: {str(e)}")
+    
+    except Exception as e:
+        logger.error(f"Critical error in main function: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
