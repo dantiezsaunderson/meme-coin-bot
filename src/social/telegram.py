@@ -23,7 +23,7 @@ class TelegramMonitor(SocialMediaMonitor):
         """Initialize the Telegram monitor."""
         self.api_id = int(TELEGRAM_API_ID)
         self.api_hash = TELEGRAM_API_HASH
-        self.session_path = "/secrets/telegram_session"
+        self.session_path = "telegram_session"
         self.last_search_time = datetime.utcnow() - timedelta(hours=24)
         self.monitored_groups = []
 
