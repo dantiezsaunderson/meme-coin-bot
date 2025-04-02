@@ -10,8 +10,9 @@ import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import random
+from pathlib import Path
 
-from ..config import MEME_KEYWORDS
+from ..config import MEME_KEYWORDS, TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN, TELEGRAM_SESSION_PATHS
 from .base import SocialMediaMonitor
 
 # Configure logging
@@ -29,19 +30,6 @@ try:
     TELETHON_AVAILABLE = True
 except ImportError:
     logger.warning("Telethon package not available. Using mock implementation.")
-
-# Get Telegram credentials from environment variables
-TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "25254354"))
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "f5f087d0e5a711a51b55bcf8b94fd786")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-
-# Session file path - check both root and secrets directory
-SESSION_FILE_PATHS = [
-    'coin_scan_session',
-    'secrets/coin_scan_session',
-    '/app/secrets/coin_scan_session',
-    '/app/coin_scan_session'
-]
 
 class TelegramMonitor(SocialMediaMonitor):
     """Telegram social media monitor implementation."""
@@ -63,7 +51,7 @@ class TelegramMonitor(SocialMediaMonitor):
             try:
                 # Try to find a valid session file
                 session_path = None
-                for path in SESSION_FILE_PATHS:
+                for path in TELEGRAM_SESSION_PATHS:
                     if os.path.exists(f"{path}.session"):
                         session_path = path
                         logger.info(f"Found existing session file at {path}.session")
@@ -71,16 +59,26 @@ class TelegramMonitor(SocialMediaMonitor):
                 
                 if not session_path:
                     logger.warning("No session file found. Using fallback mechanism.")
+                    # Create data directory if it doesn't exist
+                    os.makedirs('secrets', exist_ok=True)
+                    session_path = 'secrets/telegram_session'
                 
                 # Create and start the client
-                self.client = TelegramClient(session_path or 'meme_coin_bot_session', 
-                                            TELEGRAM_API_ID, 
-                                            TELEGRAM_API_HASH)
+                self.client = TelegramClient(session_path, 
+                                           TELEGRAM_API_ID, 
+                                           TELEGRAM_API_HASH)
                 
                 # Check if we have a bot token
                 if TELEGRAM_BOT_TOKEN:
-                    await self.client.start(bot_token=TELEGRAM_BOT_TOKEN)
-                    logger.info("Telegram client initialized successfully with bot token")
+                    try:
+                        # Try to start with bot token (non-interactive)
+                        await self.client.start(bot_token=TELEGRAM_BOT_TOKEN)
+                        logger.info("Telegram client initialized successfully with bot token")
+                    except Exception as e:
+                        logger.error(f"Error starting with bot token: {str(e)}")
+                        # Try to start without bot token (non-interactive)
+                        await self.client.start()
+                        logger.info("Telegram client initialized successfully with session file")
                 else:
                     # Try to start with the session file (non-interactive)
                     await self.client.start()
@@ -120,6 +118,7 @@ class TelegramMonitor(SocialMediaMonitor):
         
         # If telethon is not available or client initialization failed, return mock data
         if not TELETHON_AVAILABLE or not self.client:
+            logger.info("Using mock data for Telegram mentions")
             return self._generate_mock_mentions(keywords, 3)
         
         mentions = []
@@ -233,6 +232,7 @@ class TelegramMonitor(SocialMediaMonitor):
         
         # If telethon is not available or client initialization failed, return mock data
         if not TELETHON_AVAILABLE or not self.client:
+            logger.info("Using mock data for Telegram influencers")
             return self._generate_mock_influencer_posts(influencer_accounts, 3)
         
         posts = []
@@ -260,8 +260,8 @@ class TelegramMonitor(SocialMediaMonitor):
                         if not message.message:
                             continue
                         
-                        # Check if message contains meme-related keywords
-                        if self._contains_meme_keywords(message.message):
+                        # Check if message contains any meme coin related keywords
+                        if any(keyword.lower() in message.message.lower() for keyword in MEME_KEYWORDS):
                             # Create post info
                             post_info = {
                                 'source': 'telegram',
@@ -269,7 +269,8 @@ class TelegramMonitor(SocialMediaMonitor):
                                 'is_influencer': True,
                                 'content': message.message,
                                 'url': f"https://t.me/{influencer}/{message.id}" if isinstance(influencer, str) else None,
-                                'timestamp': message.date
+                                'timestamp': message.date,
+                                'followers': 0  # Telegram doesn't provide follower count easily
                             }
                             
                             posts.append(post_info)
@@ -277,31 +278,27 @@ class TelegramMonitor(SocialMediaMonitor):
                 except Exception as e:
                     logger.error(f"Error monitoring Telegram influencer '{influencer}': {str(e)}")
             
-            logger.info(f"Found {len(posts)} new posts from Telegram influencers")
+            logger.info(f"Found {len(posts)} influencer posts on Telegram")
             return posts
         
         except Exception as e:
             logger.error(f"Error monitoring Telegram influencers: {str(e)}")
             return self._generate_mock_influencer_posts(influencer_accounts, 3)
     
-    def _generate_mock_influencer_posts(self, influencers: List[str], count: int) -> List[Dict[str, Any]]:
+    def _generate_mock_influencer_posts(self, influencer_accounts: List[str], count: int) -> List[Dict[str, Any]]:
         """Generate mock influencer post data for testing."""
         mock_posts = []
         
-        # Use provided influencers or generate some if none provided
-        if not influencers:
-            influencers = ["crypto_guru", "meme_master", "whale_alerts", "token_insider", "degen_king"]
-        
         for i in range(count):
-            influencer = random.choice(influencers)
+            influencer = random.choice(influencer_accounts) if influencer_accounts else "crypto_influencer"
             
-            # Create mock content with meme keywords
+            # Create mock content
             content_templates = [
-                "Just found the next big meme coin! This one has real utility and strong community.",
-                "ALERT: New gem spotted with 100x potential. Liquidity locked, contract audited.",
-                "This new dog-themed token is gaining serious traction. Chart looks bullish!",
-                "Insider info: Major influencers about to promote this new meme coin. Get in early!",
-                "Just bought a bag of this new token. Strong fundamentals and great tokenomics."
+                "Just found this new meme coin gem! Looks promising with good liquidity.",
+                "This new token could be the next Doge or Shiba. NFA but worth checking out.",
+                "New memecoin alert! This one has actual utility and strong community.",
+                "Found a potential 100x meme coin. Early stage with solid team.",
+                "This memecoin is pumping right now! Chart looks bullish."
             ]
             
             content = random.choice(content_templates)
@@ -312,131 +309,17 @@ class TelegramMonitor(SocialMediaMonitor):
                 'is_influencer': True,
                 'content': content,
                 'url': f"https://t.me/{influencer}/12345",
-                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120))
+                'timestamp': datetime.utcnow() - timedelta(minutes=random.randint(5, 120)),
+                'followers': random.randint(10000, 500000)
             }
             
             mock_posts.append(post_info)
         
-        logger.info(f"Generated {len(mock_posts)} mock posts for Telegram influencers")
+        logger.info(f"Generated {len(mock_posts)} mock influencer posts for Telegram")
         return mock_posts
-    
-    def _contains_meme_keywords(self, content: str) -> bool:
-        """
-        Check if content contains meme-related keywords.
-        
-        Args:
-            content: The text content to check.
-            
-        Returns:
-            True if content contains meme keywords, False otherwise.
-        """
-        content_lower = content.lower()
-        for keyword in MEME_KEYWORDS:
-            if keyword.lower() in content_lower:
-                return True
-        return False
-    
-    async def analyze_sentiment(self, content: str) -> float:
-        """
-        Analyze the sentiment of a social media post.
-        
-        Args:
-            content: The text content of the post.
-            
-        Returns:
-            Sentiment score between -1.0 (negative) and 1.0 (positive).
-        """
-        try:
-            # In a real implementation, use a sentiment analysis library or API
-            # For simplicity, we'll use a basic keyword-based approach
-            
-            positive_keywords = [
-                "bullish", "moon", "pump", "gem", "buy", "hodl", "hold", "good",
-                "great", "amazing", "excellent", "profit", "gains", "win", "winning",
-                "100x", "1000x", "opportunity", "undervalued", "potential"
-            ]
-            
-            negative_keywords = [
-                "bearish", "dump", "sell", "scam", "rug", "rugpull", "bad",
-                "terrible", "awful", "loss", "losing", "crash", "down", "overvalued",
-                "avoid", "stay away", "ponzi", "honeypot"
-            ]
-            
-            content_lower = content.lower()
-            
-            positive_count = sum(1 for keyword in positive_keywords if keyword in content_lower)
-            negative_count = sum(1 for keyword in negative_keywords if keyword in content_lower)
-            
-            total_count = positive_count + negative_count
-            if total_count == 0:
-                return 0.0
-            
-            sentiment_score = (positive_count - negative_count) / total_count
-            return max(-1.0, min(1.0, sentiment_score))  # Clamp to [-1.0, 1.0]
-        
-        except Exception as e:
-            logger.error(f"Error analyzing sentiment: {str(e)}")
-            return 0.0
-    
-    async def extract_token_mentions(self, content: str) -> List[Dict[str, Any]]:
-        """
-        Extract token mentions from a social media post.
-        
-        Args:
-            content: The text content of the post.
-            
-        Returns:
-            List of dictionaries containing token information.
-        """
-        try:
-            # In a real implementation, use more sophisticated NLP techniques
-            # For simplicity, we'll use regex to find potential token symbols
-            
-            # Pattern for token symbols (e.g., $BTC, $ETH, $DOGE)
-            symbol_pattern = r'\$([A-Za-z0-9]{2,10})'
-            
-            # Find all matches
-            matches = re.findall(symbol_pattern, content)
-            
-            # Create token mentions
-            token_mentions = []
-            for match in matches:
-                token_mentions.append({
-                    'symbol': match.upper(),
-                    'context': content
-                })
-            
-            # Also look for contract addresses
-            eth_address_pattern = r'0x[a-fA-F0-9]{40}'
-            sol_address_pattern = r'[1-9A-HJ-NP-Za-km-z]{32,44}'
-            
-            eth_addresses = re.findall(eth_address_pattern, content)
-            for address in eth_addresses:
-                token_mentions.append({
-                    'address': address,
-                    'blockchain': 'ETHEREUM',
-                    'context': content
-                })
-            
-            sol_addresses = re.findall(sol_address_pattern, content)
-            for address in sol_addresses:
-                # Filter out false positives (this is a simplified approach)
-                if len(address) >= 32:
-                    token_mentions.append({
-                        'address': address,
-                        'blockchain': 'SOLANA',
-                        'context': content
-                    })
-            
-            return token_mentions
-        
-        except Exception as e:
-            logger.error(f"Error extracting token mentions: {str(e)}")
-            return []
     
     async def close(self):
         """Close the Telegram client."""
-        if self.client and TELETHON_AVAILABLE:
+        if self.client:
             await self.client.disconnect()
-            self.client = None
-            logger.info("Telegram client closed")
+            logger.info("Telegram client disconnected")
