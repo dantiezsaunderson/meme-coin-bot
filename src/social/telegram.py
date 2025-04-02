@@ -4,6 +4,7 @@ Telegram social media monitor implementation for the Meme Coin Signal Bot.
 This module implements the SocialMediaMonitor interface for Telegram.
 """
 from telethon.sync import TelegramClient
+from telethon.sessions import StringSession
 import os
 import logging
 from typing import List, Dict, Any
@@ -23,22 +24,32 @@ class TelegramMonitor(SocialMediaMonitor):
         """Initialize the Telegram monitor."""
         self.api_id = int(TELEGRAM_API_ID)
         self.api_hash = TELEGRAM_API_HASH
-        self.session_path = "telegram_session"
+        self.session_string = None
         self.last_search_time = datetime.utcnow() - timedelta(hours=24)
         self.monitored_groups = []
 
-        if not os.path.exists(self.session_path + ".session"):
-            logger.warning("[WARN] Telegram session file missing. Fallback active.")
-            self.client = None
-        else:
+        # Try to read the session string from the file
+        try:
+            with open("telegram_session.session", "r") as f:
+                self.session_string = f.read().strip()
+                logger.info("Successfully loaded session string from file")
+        except Exception as e:
+            logger.warning(f"[WARN] Could not load session string: {str(e)}")
+            self.session_string = None
+
+        # Initialize client with string session if available
+        if self.session_string:
             try:
-                self.client = TelegramClient(self.session_path, self.api_id, self.api_hash)
+                self.client = TelegramClient(StringSession(self.session_string), self.api_id, self.api_hash)
                 self.client.connect()
-                logger.info("Telegram client initialized successfully with session file")
+                logger.info("Telegram client initialized successfully with string session")
             except Exception as e:
                 logger.error(f"Error initializing Telegram client: {str(e)}")
                 logger.info("Falling back to mock implementation")
                 self.client = None
+        else:
+            logger.warning("[WARN] Telegram session string missing. Fallback active.")
+            self.client = None
 
     async def initialize(self):
         """Initialize the Telegram client."""
@@ -78,7 +89,7 @@ class TelegramMonitor(SocialMediaMonitor):
         # For now, return mock data
         return self._generate_mock_mentions(keywords, 3)
     
-    def extract_token_mentions(self, message):
+    async def extract_token_mentions(self, message):
         """
         Extract token mentions from a message.
         
@@ -92,7 +103,7 @@ class TelegramMonitor(SocialMediaMonitor):
             return []
         return []
     
-    def analyze_sentiment(self, message):
+    async def analyze_sentiment(self, message):
         """
         Analyze sentiment of a message.
         
@@ -126,6 +137,12 @@ class TelegramMonitor(SocialMediaMonitor):
         # Actual implementation would go here
         # For now, return mock data
         return self._generate_mock_influencer_posts(influencer_accounts, 3)
+    
+    async def close(self):
+        """Close the Telegram client."""
+        if self.client:
+            await self.client.disconnect()
+            logger.info("Telegram client disconnected")
     
     def _generate_mock_mentions(self, keywords: List[str], count: int) -> List[Dict[str, Any]]:
         """Generate mock mention data for testing."""
