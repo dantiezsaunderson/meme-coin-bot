@@ -1,6 +1,5 @@
 """
-Modified main application runner for the Meme Coin Signal Bot.
-
+Main application runner for the Meme Coin Bot.
 This module initializes and starts all services including the health API.
 """
 import asyncio
@@ -12,10 +11,11 @@ from threading import Thread
 import sys
 
 from src.database import init_db
-from src.blockchain.service import scanner_service
-from src.social.service import social_monitoring_service
+from src.scanners.service import scanner_service
+from src.filters.service import filter_service
 from src.scoring.service import scoring_service
-from src.telegram_bot import telegram_bot
+from src.signals.service import signal_service
+from src.telegram.bot import telegram_bot
 from src.health_api import app as health_app
 
 # Configure logging
@@ -50,40 +50,58 @@ async def main():
         health_thread = Thread(target=run_health_api, daemon=True)
         health_thread.start()
         
+        # Initialize services
+        logger.info("Initializing services...")
+        
+        # Initialize Telegram bot first
+        logger.info("Initializing Telegram bot...")
+        telegram_initialized = await telegram_bot.initialize()
+        if not telegram_initialized:
+            logger.error("Failed to initialize Telegram bot")
+            logger.warning("Continuing without Telegram bot...")
+        
+        # Initialize scanner service
+        logger.info("Initializing scanner service...")
+        scanner_initialized = await scanner_service.initialize()
+        if not scanner_initialized:
+            logger.error("Failed to initialize scanner service")
+            return
+        
+        # Initialize signal service with Telegram bot
+        logger.info("Initializing signal service...")
+        signal_initialized = await signal_service.initialize(telegram_bot)
+        if not signal_initialized:
+            logger.error("Failed to initialize signal service")
+            return
+        
+        # Initialize scoring service with other services
+        logger.info("Initializing scoring service...")
+        scoring_initialized = await scoring_service.initialize(
+            scanner_service, filter_service, signal_service
+        )
+        if not scoring_initialized:
+            logger.error("Failed to initialize scoring service")
+            return
+        
         # Start services
         tasks = []
         
-        # Start blockchain scanner service with error handling
-        try:
-            logger.info("Starting blockchain scanner service...")
-            tasks.append(asyncio.create_task(scanner_service.start()))
-        except Exception as e:
-            logger.error(f"Failed to start blockchain scanner service: {str(e)}")
-            logger.info("Continuing without blockchain scanner service...")
+        # Start scanner service
+        logger.info("Starting scanner service...")
+        tasks.append(asyncio.create_task(scanner_service.start()))
         
-        # Start social media monitoring service with error handling
-        try:
-            logger.info("Starting social media monitoring service...")
-            tasks.append(asyncio.create_task(social_monitoring_service.start()))
-        except Exception as e:
-            logger.error(f"Failed to start social media monitoring service: {str(e)}")
-            logger.info("Continuing without social media monitoring service...")
+        # Start scoring service
+        logger.info("Starting scoring service...")
+        tasks.append(asyncio.create_task(scoring_service.start()))
         
-        # Start scoring service with error handling
-        try:
-            logger.info("Starting scoring service...")
-            tasks.append(asyncio.create_task(scoring_service.start()))
-        except Exception as e:
-            logger.error(f"Failed to start scoring service: {str(e)}")
-            logger.info("Continuing without scoring service...")
+        # Start signal service
+        logger.info("Starting signal service...")
+        tasks.append(asyncio.create_task(signal_service.start()))
         
-        # Start Telegram bot with error handling
-        try:
+        # Start Telegram bot
+        if telegram_initialized:
             logger.info("Starting Telegram bot...")
             tasks.append(asyncio.create_task(telegram_bot.start()))
-        except Exception as e:
-            logger.error(f"Failed to start Telegram bot: {str(e)}")
-            logger.info("Continuing without Telegram bot...")
         
         if not tasks:
             logger.error("No services could be started. Exiting...")
@@ -97,9 +115,10 @@ async def main():
             
             # Stop all services
             await scanner_service.stop()
-            await social_monitoring_service.stop()
             await scoring_service.stop()
-            await telegram_bot.stop()
+            await signal_service.stop()
+            if telegram_initialized:
+                await telegram_bot.stop()
         except Exception as e:
             logger.error(f"Error in main loop: {str(e)}")
     

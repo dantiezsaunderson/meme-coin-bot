@@ -1,76 +1,91 @@
 """
-Pydantic models for API responses in the Meme Coin Signal Bot.
+Scoring models for the Meme Coin Bot.
 """
-from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+import logging
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
 
-class TokenScore(BaseModel):
-    """Basic token score model for API responses."""
-    id: int
-    symbol: str
-    name: Optional[str] = None
-    blockchain: str
-    price_usd: float
-    volume_24h_usd: float
-    liquidity_usd: float
-    total_score: float
+# Setup logging
+logger = logging.getLogger(__name__)
 
-class TokenDetail(BaseModel):
-    """Detailed token model for API responses."""
-    id: int
-    address: str
-    name: Optional[str] = None
-    symbol: str
-    blockchain: str
-    created_at: datetime
-    updated_at: datetime
+@dataclass
+class ScoringWeights:
+    """Weights for different scoring factors."""
     
-    # Contract details
-    contract_verified: bool
-    is_honeypot: bool
-    contract_audit_score: float
+    volume_weight: float = 0.25
+    liquidity_weight: float = 0.20
+    holder_weight: float = 0.15
+    momentum_weight: float = 0.25
+    safety_weight: float = 0.15
     
-    # Token metrics
-    current_price_usd: float
-    market_cap_usd: float
-    liquidity_usd: float
-    volume_24h_usd: float
-    holders_count: int
-    buy_sell_ratio: float
+    def __post_init__(self):
+        """Validate that weights sum to 1.0."""
+        total = (self.volume_weight + self.liquidity_weight + 
+                self.holder_weight + self.momentum_weight + 
+                self.safety_weight)
+        
+        if abs(total - 1.0) > 0.001:
+            logger.warning(f"Scoring weights do not sum to 1.0: {total}")
+            # Normalize weights
+            factor = 1.0 / total
+            self.volume_weight *= factor
+            self.liquidity_weight *= factor
+            self.holder_weight *= factor
+            self.momentum_weight *= factor
+            self.safety_weight *= factor
+
+@dataclass
+class ScoringThresholds:
+    """Thresholds for different scoring factors."""
     
-    # Scoring
+    # Volume thresholds in USD
+    min_volume: float = 1000.0
+    max_volume: float = 1000000.0
+    
+    # Liquidity thresholds in USD
+    min_liquidity: float = 10000.0
+    max_liquidity: float = 1000000.0
+    
+    # Holder count thresholds
+    min_holders: int = 50
+    max_holders: int = 5000
+    
+    # Buy/sell ratio thresholds
+    min_buy_sell_ratio: float = 0.5
+    max_buy_sell_ratio: float = 3.0
+    
+    # LP lock thresholds (percentage of liquidity locked)
+    min_lp_lock_percent: float = 0.0
+    max_lp_lock_percent: float = 100.0
+    
+    # Safety thresholds
+    min_safety_score: float = 0.0
+    max_safety_score: float = 100.0
+
+@dataclass
+class TokenScore:
+    """Token score data model."""
+    
+    token_address: str
     total_score: float
-    liquidity_score: float
     volume_score: float
-    social_score: float
+    liquidity_score: float
+    holder_score: float
+    momentum_score: float
     safety_score: float
-
-class SocialMentionResponse(BaseModel):
-    """Social mention model for API responses."""
-    id: int
-    source: str
-    author: Optional[str] = None
-    is_influencer: bool
-    content: Optional[str] = None
-    url: Optional[str] = None
-    timestamp: datetime
-    sentiment_score: float
-
-class SignalResponse(BaseModel):
-    """Signal model for API responses."""
-    id: int
-    token_id: int
-    token_symbol: str
-    signal_type: str
-    timestamp: datetime
-    score: float
-    reason: Optional[str] = None
     
-    # Snapshot of metrics at signal time
-    price_usd: float
-    liquidity_usd: float
-    volume_24h_usd: float
-    holders_count: int
-    buy_sell_ratio: float
-    social_mentions_count: int
+    def to_dict(self) -> Dict[str, float]:
+        """
+        Convert score to dictionary.
+        
+        Returns:
+            Dictionary representation of the score.
+        """
+        return {
+            "total": self.total_score,
+            "volume": self.volume_score,
+            "liquidity": self.liquidity_score,
+            "holder": self.holder_score,
+            "momentum": self.momentum_score,
+            "safety": self.safety_score
+        }
